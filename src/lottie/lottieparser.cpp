@@ -819,7 +819,7 @@ model::Asset *LottieParserImpl::parseAsset()
     auto        asset = allocator().make<model::Asset>();
     std::string filename;
     std::string relativePath;
-    bool        embededResource = false;
+    bool        embeddedResource = false;
     EnterObject();
     while (const char *key = NextObjectKey()) {
         if (0 == strcmp(key, "w")) {
@@ -832,7 +832,7 @@ model::Asset *LottieParserImpl::parseAsset()
         } else if (0 == strcmp(key, "u")) { /* relative image path */
             relativePath = GetStringObject();
         } else if (0 == strcmp(key, "e")) { /* relative image path */
-            embededResource = GetInt();
+            embeddedResource = GetInt();
         } else if (0 == strcmp(key, "id")) { /* reference id*/
             if (PeekType() == kStringType) {
                 asset->mRefId = GetStringObject();
@@ -859,14 +859,23 @@ model::Asset *LottieParserImpl::parseAsset()
         }
     }
 
-    if (asset->mAssetType == model::Asset::Type::Image) {
-        if (embededResource) {
-            // embeder resource should start with "data:"
-            if (filename.compare(0, 5, "data:") == 0) {
+    if (asset->mAssetType == model::Asset::Type::Image && !filename.empty()) {
+        if (embeddedResource) {
+            // embedded resource should start with "data:"
+            // URL Scheme: "data:[<mediatype>][;base64],<data>"
+            if (filename.compare(0, 5, "data:") == 0 && filename.find(',') != std::string::npos) {
                 asset->loadImageData(convertFromBase64(filename));
             }
         } else {
-            asset->loadImagePath(mDirPath + relativePath + filename);
+            // reject dangerous paths
+            if (filename.find("..") != std::string::npos // block path traversal
+                || filename[0] == '/') { // block unix absolute path
+#ifdef DEBUG_PARSER
+                vWarning << "Dangerous path was blocked: " << filename;
+#endif
+            } else {
+                asset->loadImagePath(mDirPath + relativePath + filename);
+            }
         }
     }
 
@@ -2406,9 +2415,9 @@ std::shared_ptr<model::Composition> model::parse(char *             str,
 {
     auto input = str;
 
-    auto dotLottie = checkDotLottie(str);
+    auto dotLottie = checkDotLottie(input);
     if (dotLottie) {
-        input = uncompressZip(str, length);
+        input = uncompressZip(input, length);
     }
 
     LottieParserImpl obj(input, std::move(dir_path), std::move(filter));
